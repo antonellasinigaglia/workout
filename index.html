@@ -156,7 +156,14 @@ body[data-view="detail"] .rail{display:none}
 .wrow b{display:block;font-weight:600;font-size:15px;line-height:1.3}
 .wrow span{color:var(--grey);font-size:13px}
 .thumb{position:relative;aspect-ratio:1;max-width:100%;background:var(--ctl);border-radius:14px;overflow:hidden}
-.thumb canvas,.thumb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.thumb canvas,.thumb video,.thumb img.vthumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.thumb .play{position:absolute;right:5px;bottom:5px;width:22px;height:22px;border-radius:50%;background:rgba(28,26,53,.6);color:#fff;font-size:9px;display:grid;place-items:center;z-index:1;padding-left:2px}
+.vlink{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;background:var(--ctl);border-radius:14px;padding:12px}
+.vlink input{width:100%;min-width:0;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:16px;color:var(--ink);background:var(--card)}
+.vlink input:focus{outline:none;border-color:var(--accent)}
+.vlink div{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.vlink small{color:var(--grey);font-size:12px;line-height:1.4}
+.vlink .tcx.solid{background:var(--accent);color:#fff}
 .thumb .order{position:absolute;left:5px;top:5px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;z-index:1}
 .ex{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px 14px;padding:14px 0;align-items:center}
 @media (min-width:1500px){.ex{grid-template-columns:72px minmax(0,1fr) auto}}
@@ -260,7 +267,7 @@ body[data-view="detail"] .rail{display:none}
 .s-name{font-size:clamp(28px,7.5vw,56px);margin:2px 0 0}
 .s-sub{color:var(--grey);font-size:14px;font-weight:500}
 .s-video{position:relative;flex:1;min-height:150px;background:var(--g-a);border-radius:24px;overflow:hidden;box-shadow:var(--shadow)}
-.s-video canvas,.s-video video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.s-video canvas,.s-video video,.s-video iframe{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border:0}
 .s-video .tag{position:absolute;left:12px;top:12px;background:rgba(255,255,255,.26);color:#fff;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font-weight:600;font-size:12px;padding:5px 12px;border-radius:var(--pill)}
 .s-reps{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .s-reps .big{font-family:var(--display);font-weight:700;font-size:clamp(40px,10vw,60px);line-height:1;color:var(--accent)}
@@ -614,7 +621,9 @@ const store = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d }catch(e){ return d } },
   set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} }
 };
-let videos = {}; // exercise id -> asset id of an uploaded clip
+let videos = {}; // exercise id -> asset id of an uploaded clip (Claude artifact)
+let links = store.get("gd-links", {}); // exercise id -> video link (GitHub Pages: YouTube, Vimeo, Google Drive or a .mp4)
+const LINKS_ON = /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
 function applyCfg(cfg){
   if (!cfg) return;
   ALL.forEach(e => {
@@ -786,15 +795,37 @@ function videoUrl(id){
   if (videos[id]) return "/_blob/" + videos[id];
   return window.claude ? null : `videos/${id}.mp4`; // standalone hosting: optional clips in a videos/ folder
 }
+// what a pasted link can play: YouTube, Vimeo, Google Drive (shared "anyone with the link") or a direct video file
+function videoEmbed(url){
+  url = String(url || "").trim(); let m;
+  if ((m = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{11})/)))
+    return {kind:"yt", src:`https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&mute=1&loop=1&playlist=${m[1]}&controls=0&playsinline=1&rel=0&modestbranding=1`, thumb:`https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`};
+  if ((m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/))) return {kind:"vimeo", src:`https://player.vimeo.com/video/${m[1]}?autoplay=1&muted=1&loop=1&background=1`};
+  if ((m = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]+)/))) return {kind:"drive", src:`https://drive.google.com/file/d/${m[1]}/preview`};
+  if (/^https?:\/\/\S+\.(mp4|webm|mov|m4v)(\?\S*)?$/i.test(url)) return {kind:"file", src:url};
+  return null;
+}
 // fills a container with the real clip when there is one, else the figure animation
 function mountMotion(el, e, opts = {}){
-  el.querySelectorAll("canvas,video").forEach(n => n.remove());
+  el.querySelectorAll("canvas,video,iframe,img.vthumb,.play").forEach(n => n.remove());
+  const link = LINKS_ON && !opts.figure && videoEmbed(links[e.id]);
+  if (link && link.kind !== "file"){
+    if (opts.live){ // the session plays the linked video
+      const f = document.createElement("iframe");
+      Object.assign(f, {src:link.src, title:`${e.name} video`, allow:"autoplay; encrypted-media; picture-in-picture; fullscreen", referrerPolicy:"strict-origin-when-cross-origin"});
+      el.prepend(f); return;
+    }
+    if (link.thumb){ const im = document.createElement("img"); Object.assign(im, {className:"vthumb", src:link.thumb, alt:""}); el.prepend(im); }
+    const b = document.createElement("span"); b.className = "play"; b.textContent = "▶"; b.setAttribute("aria-hidden", "true"); el.appendChild(b);
+    if (link.thumb) return;
+  }
   const fallback = () => {
     const c = document.createElement("canvas"); c.setAttribute("aria-hidden", "true");
     el.prepend(c);
     views.add({canvas:c, motion:e.motion || e.id, bells:e.kg > 0, still:reduceMotion, fg:opts.fg || getVar("--ink"), far:opts.far || getVar("--grey"), floor:opts.floor || getVar("--line"), zoom:opts.zoom, shift:opts.shift});
   };
-  const url = videoUrl(e.id);
+  if (link && link.kind !== "file") return fallback();
+  const url = link ? link.src : opts.figure ? null : videoUrl(e.id);
   if (!url) return fallback();
   const v = document.createElement("video");
   Object.assign(v, {src:url, muted:true, loop:true, playsInline:true, autoplay:!reduceMotion, preload:"metadata"});
@@ -888,7 +919,7 @@ function renderCards(){
         <span class="m"><span><svg class="ico"><use href="#i-clock"/></svg>${minutesFor(w)} mins</span><span><svg class="ico"><use href="#i-body"/></svg>${w.focus}</span></span>
       </button>`;
     const card = box.querySelector(".wcard");
-    mountMotion(card, w.exercises[0], CARD_FIG);
+    mountMotion(card, w.exercises[0], {...CARD_FIG, figure:true});
     card.onclick = () => openDetail(w.id);
     wrap.appendChild(box);
   });
@@ -908,7 +939,7 @@ function saveCfg(){
   store.set("gd-cfg", cfg); estimate();
   clearTimeout(cfgTimer);
   const vars = Object.fromEntries(["b","c","d"].map(b => [b, store.get("gd-var-" + b, b)]));
-  cfgTimer = setTimeout(() => { if (db && uid) histCol().doc("settings").set({cfg, videos, vars, warm:$("optWarm").checked, updated:new Date().toISOString()}).catch(() => {}) }, 700);
+  cfgTimer = setTimeout(() => { if (db && uid) histCol().doc("settings").set({cfg, videos, links, vars, warm:$("optWarm").checked, updated:new Date().toISOString()}).catch(() => {}) }, 700);
 }
 const range = (a, b, st) => { const o = []; for (let v = a; v <= b + 1e-9; v += st) o.push(Math.round(v * 10) / 10); return o; };
 // dropdowns for reps (or seconds) and kg per dumbbell; the current value is always one of the options
@@ -923,6 +954,28 @@ function picker(e, field){
     <select id="in-${e.id}-${field}" data-f="${field}" aria-label="${e.name}, ${label}">${opts.map(v => `<option value="${v}"${v === cur ? " selected" : ""}>${kg ? (v ? fmtKg(v) + " kg" : "No weight") : v + " " + unit}</option>`).join("")}</select></label>`;
 }
 let pickFor = null;
+function openLinkEditor(li, e, btn){
+  const open = li.querySelector(".vlink"); if (open){ open.remove(); btn.setAttribute("aria-expanded", "false"); return; }
+  btn.setAttribute("aria-expanded", "true");
+  const box = document.createElement("div"); box.className = "vlink";
+  box.innerHTML = `<label class="pick" style="padding:0;background:none"><span>Video link</span></label>
+    <input type="url" id="vl-${e.id}" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…" value="${(links[e.id] || "").replace(/"/g, "&quot;")}">
+    <small>YouTube (upload as Unlisted, then Share › Copy link), Vimeo, Google Drive shared with "Anyone with the link", or a link to an .mp4 file.</small>
+    <div><button type="button" class="tcx solid" data-a="save">Save</button>${links[e.id] ? `<button type="button" class="tcx" data-a="rm">Remove</button>` : ""}<button type="button" class="tcx" data-a="x">Cancel</button></div>`;
+  li.appendChild(box);
+  const input = box.querySelector("input"); input.focus();
+  const save = () => {
+    const url = input.value.trim();
+    if (!url){ delete links[e.id]; }
+    else if (!videoEmbed(url)){ toast("Link not recognised"); input.focus(); return; }
+    else links[e.id] = url;
+    store.set("gd-links", links); saveCfg(); renderList(); toast(url ? "Video linked" : "Video removed");
+  };
+  box.querySelector('[data-a="save"]').onclick = save;
+  input.onkeydown = ev => { if (ev.key === "Enter") save(); if (ev.key === "Escape") box.querySelector('[data-a="x"]').click(); };
+  const rm = box.querySelector('[data-a="rm"]'); if (rm) rm.onclick = () => { input.value = ""; save(); };
+  box.querySelector('[data-a="x"]').onclick = () => { box.remove(); btn.setAttribute("aria-expanded", "false"); };
+}
 function renderList(){
   $("exlist").innerHTML = "";
   exercises.forEach((e, i) => {
@@ -930,7 +983,8 @@ function renderList(){
     const plan = e.range ? ` · plan ${e.range}` : "";
     li.innerHTML = `<div class="thumb"><span class="order">${i+1}</span></div>
       <div class="ex-info"><b>${e.name}</b><span>${e.muscle}${plan}</span>
-        ${assets ? `<button class="vid" type="button">${videos[e.id] ? "Change video" : "Upload your video"}</button>` : ""}</div>
+        ${assets ? `<button class="vid" type="button">${videos[e.id] ? "Change video" : "Upload your video"}</button>`
+          : LINKS_ON ? `<button class="vid" type="button" aria-expanded="false">${links[e.id] ? "Change video link" : "Add video link"}</button>` : ""}</div>
       <div class="ex-ctrl">${picker(e, "qty")}${e.kg !== null ? picker(e, "kg") : ""}</div>`;
     mountMotion(li.querySelector(".thumb"), e, {zoom:1, shift:-2});
     li.querySelectorAll("select").forEach(sel => sel.onchange = () => {
@@ -938,7 +992,8 @@ function renderList(){
       saveCfg();
     });
     const vb = li.querySelector(".vid");
-    if (vb) vb.onclick = () => { pickFor = e.id; $("vidPick").value = ""; $("vidPick").click(); };
+    if (vb && assets) vb.onclick = () => { pickFor = e.id; $("vidPick").value = ""; $("vidPick").click(); };
+    else if (vb) vb.onclick = () => openLinkEditor(li, e, vb);
     $("exlist").appendChild(li);
   });
   const rest = document.createElement("li"); rest.className = "rest-line";
@@ -953,7 +1008,7 @@ function renderList(){
     $("warmList").appendChild(li);
   });
   const hero = $("heroMedia"); hero.style.background = `var(${PLAN.grad})`;
-  mountMotion(hero, exercises[0], HERO_FIG);
+  mountMotion(hero, exercises[0], {...HERO_FIG, figure:true});
 }
 function renderPlan(){
   $("heroKicker").textContent = `${PLAN.day} · Workout ${PLAN.letter}`;
@@ -1053,6 +1108,7 @@ async function loadRemoteSettings(){
       if (!S){
         applyCfg(data.cfg); if (data.cfg) store.set("gd-cfg", data.cfg);
         if (data.vars) Object.entries(data.vars).forEach(([b, id]) => store.set("gd-var-" + b, id));
+        if (data.links){ links = {...data.links}; store.set("gd-links", links); }
         if (typeof data.warm === "boolean"){ $("optWarm").checked = data.warm; store.set("gd-warm", data.warm); }
       }
     } else saveCfg();
@@ -1303,7 +1359,7 @@ function render(){
   $("phaseTag").textContent = st.kind === "work" ? "Work" : st.kind === "warm" ? "Warm-up" : st.kind === "rest" ? "Rest" : st.label === "Get ready" ? "Get ready" : "Change position";
   $("mainBtn").textContent = isActive(st) ? "Done" : "Skip";
   // video: the current exercise, or the next one during rest and changes
-  if (S.shownE !== e){ S.shownE = e; mountMotion($("sVideo"), e, SESSION_FIG); }
+  if (S.shownE !== e){ S.shownE = e; mountMotion($("sVideo"), e, {...SESSION_FIG, live:true}); }
   let tag = $("sVideo").querySelector(".tag");
   if (!isActive(st)){ if (!tag){ tag = document.createElement("span"); tag.className = "tag"; $("sVideo").appendChild(tag); } tag.textContent = st.kind === "rest" ? `Then: ${e.name}` : "Up next"; }
   else if (tag) tag.remove();
