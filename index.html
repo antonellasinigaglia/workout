@@ -1215,7 +1215,7 @@ const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jeste
 const voiceRank = v => (/premium|enhanced|siri|neural|natural|online/i.test(v.name) ? 0
   : /ava|zoe|samantha|allison|evan|nathan|daniel|serena|karen|moira|tom|susan|google|aria|jenny|guy/i.test(v.name) ? 1 : 2) * 2 + (/en[-_](us|gb)/i.test(v.lang) ? 0 : 1);
 const VOICE_KEY = "gd-voice-en2"; // new key: an older saved choice no longer overrides Samantha
-const REC = "__rec"; // the recorded coach (audio/coach.m4a), same voice on every device
+const REC = "__rec"; // the recorded coach (coach.m4a), same voice on every device
 const isSamantha = v => /samantha/i.test(v.name) && /^en[-_]US/i.test(v.lang);
 const slugify = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -1224,7 +1224,7 @@ const COACH = {clips:null, raw:null, buf:null, nodes:[], loading:null};
 function loadCoach(){
   return COACH.loading ||= (async () => {
     try{
-      const [j, a] = await Promise.all([fetch("audio/coach.json").then(r => r.ok ? r.json() : null), fetch("audio/coach.m4a").then(r => r.ok ? r.arrayBuffer() : null)]);
+      const [j, a] = await Promise.all([fetch("coach.json").then(r => r.ok ? r.json() : null), fetch("coach.m4a").then(r => r.ok ? r.arrayBuffer() : null)]);
       if (j && a){ COACH.clips = j.clips; COACH.raw = a; pickVoice(); }
     }catch(e){}
   })();
