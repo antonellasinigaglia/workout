@@ -225,6 +225,17 @@ body[data-view="detail"] .rail{display:none}
 .ptitle{font-family:var(--display);font-weight:600;font-size:21px;margin:0 0 8px}
 .set{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);font-weight:500}
 .vrow{display:flex;gap:8px;align-items:center;min-width:0}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;padding:13px 16px;border-radius:14px;background:var(--card);color:var(--ink);border:1.5px solid var(--line);font-weight:600;font-size:15px;transition:border-color .2s,transform .12s}
+.gbtn:hover{border-color:var(--accent)}
+.gbtn:active{transform:scale(.98)}
+.gbtn svg{width:20px;height:20px;flex:none}
+.acc{display:flex;align-items:center;gap:12px}
+.acc img,.acc .ph{width:44px;height:44px;border-radius:50%;flex:none;object-fit:cover;background:var(--soft);color:var(--accent);display:grid;place-items:center;font-family:var(--display);font-weight:700}
+.acc div{min-width:0;flex:1}
+.acc b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc span{display:block;font-size:12px;color:var(--grey);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.syncnote{margin:8px 0 0;font-size:12px;color:var(--grey)}
+.syncnote button{color:var(--link);font-weight:600;font-size:12px;padding:0}
 .vrow select{font:inherit;font-size:14px;color:var(--ink);background:var(--ctl);border:0;border-radius:10px;padding:8px 10px;max-width:170px;min-width:0}
 
 /* ---------- Session (light stage, violet controls) ---------- */
@@ -397,6 +408,7 @@ body[data-view="detail"] .rail{display:none}
           <h2 class="ptitle" id="htitle">History</h2>
           <div class="hist" id="hist"></div>
           <p class="note" id="histSrc"></p>
+          <p class="syncnote" id="syncHint" hidden>Using more than one device? <button type="button" id="syncGo">Sign in with Google</button> to sync.</p>
         </div>
       </div>
     </section>
@@ -404,6 +416,15 @@ body[data-view="detail"] .rail{display:none}
     <section id="v-settings" hidden aria-labelledby="setTitle">
       <header class="top wrap"><h1 class="disp" id="setTitle">Settings</h1></header>
       <div class="act wrap">
+        <div class="panel" id="accPanel" hidden>
+          <h2 class="ptitle">Account</h2>
+          <div id="accOut">
+            <p class="note" style="margin:0 0 14px">Sign in to keep history, reps, weights and settings in sync on all your devices.</p>
+            <button type="button" class="gbtn" id="gIn"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.7 1.2 9.2 3.6l6.9-6.9C35.9 2.4 30.4 0 24 0 14.6 0 6.6 5.4 2.7 13.3l8 6.2C12.6 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.5 5.8c4.4-4 6.8-10 6.8-17.2z"/><path fill="#FBBC05" d="M10.7 28.5c-.5-1.4-.8-2.9-.8-4.5s.3-3.1.8-4.5l-8-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l8-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.2 0-11.4-4.1-13.3-9.8l-8 6.2C6.6 42.6 14.6 48 24 48z"/></svg>Sign in with Google</button>
+          </div>
+          <div id="accIn" class="acc" hidden><img id="accPic" alt="" referrerpolicy="no-referrer" hidden><span class="ph" id="accPh"></span><div><b id="accName"></b><span id="accMail"></span></div><button type="button" class="tcx" id="gOut">Sign out</button></div>
+          <p class="note" id="accNote">Synced with your Google account through Firebase.</p>
+        </div>
         <div class="panel">
           <h2 class="ptitle">Coach</h2>
           <label class="set">Voice coach<span class="sw"><input type="checkbox" id="optVoice" checked></span></label>
@@ -789,7 +810,8 @@ const CARD_FIG = {...ON_GRAD, zoom:.92, shift:0};
 
 /* ---------- History store (declared early: the home screen reads it) ---------- */
 let history = [], db = null, uid = null, assets = null;
-const histCol = () => db.collection("data/users/" + uid);
+// Claude artifact: the per-user db at data/users/<id>. GitHub Pages: Firestore at users/<uid>/items (sessions + the "settings" doc)
+const histCol = () => FB && db === FB.fs ? FB.fs.collection("users").doc(uid).collection("items") : db.collection("data/users/" + uid);
 
 /* ---------- Navigation ---------- */
 let VIEW = "home";
@@ -885,7 +907,8 @@ function saveCfg(){
   WORKOUTS.forEach(w => cfg["_" + w.id] = {rounds:w.rounds, rest:w.rest});
   store.set("gd-cfg", cfg); estimate();
   clearTimeout(cfgTimer);
-  cfgTimer = setTimeout(() => { if (db && uid) histCol().doc("settings").set({cfg, videos, updated:new Date().toISOString()}).catch(() => {}) }, 700);
+  const vars = Object.fromEntries(["b","c","d"].map(b => [b, store.get("gd-var-" + b, b)]));
+  cfgTimer = setTimeout(() => { if (db && uid) histCol().doc("settings").set({cfg, videos, vars, warm:$("optWarm").checked, updated:new Date().toISOString()}).catch(() => {}) }, 700);
 }
 const range = (a, b, st) => { const o = []; for (let v = a; v <= b + 1e-9; v += st) o.push(Math.round(v * 10) / 10); return o; };
 // dropdowns for reps (or seconds) and kg per dumbbell; the current value is always one of the options
@@ -960,7 +983,7 @@ function selectPlan(id){
   exercises = PLAN.exercises; ROUNDS = PLAN.rounds; REST = PLAN.rest; SETS = ROUNDS * exercises.length;
   renderPlan();
 }
-$("varLink").onclick = () => { const alt = altOf(PLAN); if (!alt) return; store.set("gd-var-" + baseOf(alt), alt.id); selectPlan(alt.id); };
+$("varLink").onclick = () => { const alt = altOf(PLAN); if (!alt) return; store.set("gd-var-" + baseOf(alt), alt.id); selectPlan(alt.id); saveCfg(); };
 const setPlanNum = (k, v) => {
   if (k === "rounds") PLAN.rounds = v; else PLAN.rest = v;
   const y = scrollY; selectPlan(PLAN.id); saveCfg(); window.scrollTo(0, y);
@@ -979,7 +1002,7 @@ $("optSound").checked = store.get("gd-sound", true);
 $("optWarm").checked = store.get("gd-warm", true);
 $("optVoice").onchange = e => store.set("gd-voice", e.target.checked);
 $("optSound").onchange = e => store.set("gd-sound", e.target.checked);
-$("optWarm").onchange = e => { store.set("gd-warm", e.target.checked); $("warmOff").hidden = e.target.checked; estimate(); };
+$("optWarm").onchange = e => { store.set("gd-warm", e.target.checked); $("warmOff").hidden = e.target.checked; saveCfg(); };
 
 /* ---------- History: per-person db when available, else this device ---------- */
 async function loadHistory(){
@@ -996,7 +1019,9 @@ async function saveSession(rec){
   if (db && uid){ try{ await histCol().doc(rec.id).set(rec) }catch(e){} }
 }
 function renderHistory(){
-  $("histSrc").textContent = db && uid ? "Saved to your account." : "Saved on this device.";
+  const google = FB && account && db === FB.fs;
+  $("histSrc").textContent = google ? `Synced to ${account.email || "your Google account"}.` : db && uid ? "Saved to your account." : "Saved on this device.";
+  $("syncHint").hidden = !FB_ON || google;
   const h = $("hist"); h.innerHTML = "";
   if (!history.length){ h.innerHTML = `<div class="empty">No workouts yet. Finish your first one and it shows up here, with duration, rounds and the Strava file.</div>`; return; }
   history.forEach(r => {
@@ -1019,6 +1044,21 @@ function renderActivity(){
   $("wkKcal").textContent = wk.reduce((s, r) => s + (r.kcal || 0), 0);
   $("allCount").textContent = history.filter(r => r.completed).length;
 }
+// settings saved with the account win over this device's copy
+async function loadRemoteSettings(){
+  try{
+    const s = await histCol().doc("settings").get();
+    if (s.exists){
+      const data = s.data(); videos = {...(data.videos || {})};
+      if (!S){
+        applyCfg(data.cfg); if (data.cfg) store.set("gd-cfg", data.cfg);
+        if (data.vars) Object.entries(data.vars).forEach(([b, id]) => store.set("gd-var-" + b, id));
+        if (typeof data.warm === "boolean"){ $("optWarm").checked = data.warm; store.set("gd-warm", data.warm); }
+      }
+    } else saveCfg();
+  }catch(e){}
+  if (!S){ selectPlan(PLAN.id); if (VIEW === "home") renderHome(); }
+}
 (async () => {
   try{
     if (!window.claude?.use) return;
@@ -1026,18 +1066,70 @@ function renderActivity(){
     assets = a;
     if (d && u){
       const id = await u.id();
-      if (id){
-        db = d; uid = id; loadHistory();
-        try{
-          const s = await histCol().doc("settings").get();
-          if (s.exists){ const data = s.data(); videos = {...(data.videos || {})}; if (!S){ applyCfg(data.cfg); store.set("gd-cfg", data.cfg); } }
-          else saveCfg();
-        }catch(e){}
-      }
+      if (id){ db = d; uid = id; loadHistory(); await loadRemoteSettings(); return; }
     }
     if (!S){ selectPlan(PLAN.id); if (VIEW === "home") renderHome(); }
   }catch(e){}
 })();
+
+/* ---------- Google sign-in (GitHub Pages): Firebase Auth + Firestore, one private folder per person ---------- */
+const FB_CONFIG = {
+  apiKey: "AIzaSyBRWFChEGWMEoJpo8ldr2MomdIgKXtZkNA",
+  authDomain: "workout-f8ac0.firebaseapp.com",
+  projectId: "workout-f8ac0",
+  storageBucket: "workout-f8ac0.firebasestorage.app",
+  messagingSenderId: "655635580438",
+  appId: "1:655635580438:web:01bdd80991171d3f035737"
+};
+// only where the Firebase project allows sign-in; the Claude artifact keeps using the Claude account
+const FB_ON = /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
+let FB = null, account = null;
+const loadScript = src => new Promise((ok, ko) => { const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = ko; document.head.appendChild(el); });
+async function initFirebase(){
+  const base = "https://www.gstatic.com/firebasejs/10.12.2/";
+  await loadScript(base + "firebase-app-compat.js");
+  await Promise.all([loadScript(base + "firebase-auth-compat.js"), loadScript(base + "firebase-firestore-compat.js")]);
+  firebase.initializeApp(FB_CONFIG);
+  FB = {auth:firebase.auth(), fs:firebase.firestore()};
+  FB.auth.getRedirectResult().catch(err => { if (err?.code) toast("Sign-in failed"); });
+  FB.auth.onAuthStateChanged(onAccount);
+}
+function renderAccount(){
+  $("accPanel").hidden = !FB_ON;
+  $("accOut").hidden = !!account; $("accIn").hidden = !account;
+  $("accNote").hidden = !account;
+  if (account){
+    $("accName").textContent = account.displayName || "Signed in";
+    $("accMail").textContent = account.email || "";
+    $("accPic").hidden = !account.photoURL; if (account.photoURL) $("accPic").src = account.photoURL;
+    $("accPh").hidden = !!account.photoURL; $("accPh").textContent = (account.displayName || account.email || "?").trim()[0].toUpperCase();
+  }
+  renderHistory();
+}
+async function onAccount(u){
+  account = u; renderAccount();
+  if (u){
+    db = FB.fs; uid = u.uid;
+    // first sign-in on this device: copy its local history into the account (same ids, so repeats are harmless)
+    const key = "gd-merged-" + u.uid;
+    if (!store.get(key, false)){
+      try{ await Promise.all(store.get("gd-hist", []).filter(r => r && r.id && r.start).map(r => histCol().doc(r.id).set(r))); store.set(key, true); }catch(e){}
+    }
+    await loadHistory(); await loadRemoteSettings();
+  } else if (FB && db === FB.fs){ db = null; uid = null; loadHistory(); }
+}
+async function signIn(){
+  if (!FB){ toast("Sign-in is still loading"); return; }
+  const p = new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({prompt:"select_account"});
+  try{ await FB.auth.signInWithPopup(p); }
+  catch(err){
+    if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/web-storage-unsupported"].includes(err?.code)) return FB.auth.signInWithRedirect(p);
+    if (!["auth/popup-closed-by-user", "auth/cancelled-popup-request"].includes(err?.code)) toast("Sign-in failed");
+  }
+}
+$("gIn").onclick = signIn;
+$("syncGo").onclick = () => { show("settings"); signIn(); };
+$("gOut").onclick = async () => { try{ await FB.auth.signOut(); toast("Signed out"); }catch(e){} };
 
 /* ---------- Audio: voice + synth sounds ---------- */
 let actx = null, audioOn = true;
@@ -1307,6 +1399,8 @@ $("quit").onclick = () => {
 selectPlan(versionFor(WEEK_BASE[todayIdx] || WEEK_BASE.find((b, i) => b && i > todayIdx) || "a").id);
 show("home");
 loadHistory();
+renderAccount();
+if (FB_ON) initFirebase().catch(() => { $("accOut").querySelector(".note").textContent = "Sign-in needs a connection. Your workouts are saved on this device."; });
 const rerender = () => { if (S) return; renderPlan(); if (VIEW === "home") renderCards(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", rerender);
 new MutationObserver(rerender).observe(document.documentElement, {attributes:true, attributeFilter:["data-theme"]});
