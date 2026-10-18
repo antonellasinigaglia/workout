@@ -134,7 +134,7 @@ body[data-view="detail"] .rail{display:none}
 .chips button small{font-family:var(--text);font-size:10px;font-weight:600;color:var(--grey)}
 .chips button:active{transform:scale(.95)}
 .chips button[aria-checked="true"]{background:var(--accent);color:#fff;box-shadow:0 8px 18px -10px rgba(94,63,232,.7)}
-#roundChips{grid-template-columns:repeat(4,minmax(0,1fr))}
+#roundChips,#restChips{grid-template-columns:repeat(4,minmax(0,1fr))}
 .chips button[aria-checked="true"] small{color:rgba(255,255,255,.8)}
 .mini{display:flex;gap:6px}
 .mini button{width:30px;height:30px;border-radius:50%;background:var(--card);color:var(--accent);font-size:18px;line-height:1;display:grid;place-items:center;box-shadow:0 1px 3px rgba(40,30,90,.12);transition:transform .12s}
@@ -793,7 +793,7 @@ function drawFigure(v, time){
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 function videoUrl(id){
   if (videos[id]) return "/_blob/" + videos[id];
-  return window.claude ? null : `videos/${id}.mp4`; // standalone hosting: optional clips in a videos/ folder
+  return LINKS_ON ? `${id}.mp4` : null; // GitHub Pages: an optional clip uploaded next to the page, named after the exercise id
 }
 // what a pasted link can play: YouTube, Vimeo, Google Drive (shared "anyone with the link") or a direct video file
 function videoEmbed(url){
@@ -960,7 +960,7 @@ function openLinkEditor(li, e, btn){
   const box = document.createElement("div"); box.className = "vlink";
   box.innerHTML = `<label class="pick" style="padding:0;background:none"><span>Video link</span></label>
     <input type="url" id="vl-${e.id}" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…" value="${(links[e.id] || "").replace(/"/g, "&quot;")}">
-    <small>YouTube (upload as Unlisted, then Share › Copy link), Vimeo, Google Drive shared with "Anyone with the link", or a link to an .mp4 file.</small>
+    <small>YouTube (upload as Unlisted, then Share › Copy link), Vimeo, Google Drive shared with "Anyone with the link", or a link to an .mp4 file. Or skip the link and upload a video named <b>${e.id}.mp4</b> to the GitHub repository.</small>
     <div><button type="button" class="tcx solid" data-a="save">Save</button>${links[e.id] ? `<button type="button" class="tcx" data-a="rm">Remove</button>` : ""}<button type="button" class="tcx" data-a="x">Cancel</button></div>`;
   li.appendChild(box);
   const input = box.querySelector("input"); input.focus();
@@ -997,7 +997,7 @@ function renderList(){
     $("exlist").appendChild(li);
   });
   const rest = document.createElement("li"); rest.className = "rest-line";
-  rest.innerHTML = ROUNDS > 1 ? `End of round, rest<b class="num">${fmtRest(REST)}</b>` : `One round, no rest`;
+  rest.innerHTML = ROUNDS < 2 ? `One round, no rest` : REST ? `End of round, rest<b class="num">${fmtRest(REST)}</b>` : `No rest between rounds, just the 5 sec change`;
   $("exlist").appendChild(rest);
   $("warmList").innerHTML = "";
   PLAN.warmup.forEach(w => {
@@ -1014,7 +1014,7 @@ function renderPlan(){
   $("heroKicker").textContent = `${PLAN.day} · Workout ${PLAN.letter}`;
   $("heroTitle").textContent = PLAN.name;
   $("focusTag").textContent = PLAN.focus;
-  $("heroText").textContent = `${PLAN.blurb} ${ROUNDS} round${ROUNDS > 1 ? "s" : ""}, ${restWords(REST)} of rest between them.`;
+  $("heroText").textContent = `${PLAN.blurb} ${ROUNDS} round${ROUNDS > 1 ? "s" : ""}${ROUNDS < 2 ? "." : REST ? `, ${restWords(REST)} of rest between them.` : ", no rest between them."}`;
   $("lvl").textContent = PLAN.level;
   $("eqVal").textContent = PLAN.base ? "Band + step" : "Dumbbells";
   const alt = altOf(PLAN);
@@ -1024,8 +1024,10 @@ function renderPlan(){
   $("planNote").textContent = `Planned: ${PLAN.plan}. Reps and kg per dumbbell are saved for next time.`;
   const chip = (v, on, txt, sub) => `<button type="button" role="radio" aria-checked="${on}" data-v="${v}">${txt}${sub ? `<small>${sub}</small>` : ""}</button>`;
   $("roundChips").innerHTML = [1,2,3,4].map(v => chip(v, v === ROUNDS, v, PLAN.plan.startsWith(v) || PLAN.plan.startsWith("3–4") && (v === 3 || v === 4) ? "plan" : "")).join("");
-  const rests = [...new Set([30, 45, 60, 90, 120, 180, REST])].sort((a, b) => a - b);
-  const planRest = s => PLAN.plan.includes(s < 60 ? `${s} sec` : s === 60 ? "60 sec" : `${s/60} min`) || (s === 45 || s === 60) && PLAN.plan.includes("45–60");
+  const rests = [...new Set([0, 5, 30, 45, 60, 90, 120, 180, REST])].sort((a, b) => a - b);
+  // planned rest from text like "60 sec rest", "45–60 sec rest" or "2 min rest"
+  const planRest = s => { const m = PLAN.plan.match(/(\d+)(?:–(\d+))? (sec|min) rest/); if (!m) return false;
+    const k = m[3] === "min" ? 60 : 1, lo = +m[1] * k, hi = (m[2] ? +m[2] : +m[1]) * k; return s === lo || s === hi; };
   $("restChips").innerHTML = rests.map(v => chip(v, v === REST, v < 60 ? v + "s" : v % 60 ? fmtRest(v) : v / 60 + " min", planRest(v) ? "plan" : "")).join("");
   $("roundChips").querySelectorAll("button").forEach(b => b.onclick = () => setPlanNum("rounds", +b.dataset.v));
   $("restChips").querySelectorAll("button").forEach(b => b.onclick = () => setPlanNum("rest", +b.dataset.v));
@@ -1311,7 +1313,8 @@ function buildSteps(){
       steps.push({kind:"work", round:r, ex:i, e, dur: e.type === "time" ? e.qty * sides(e) : null});
       if (i < exercises.length - 1) steps.push({kind:"trans", dur:TRANS, round:r, ex:i+1, e:exercises[i+1], label:"Change"});
     });
-    if (r < ROUNDS) steps.push({kind:"rest", dur:REST, round:r, ex:0, e:exercises[0], label:"Rest"});
+    // no rest: the next round starts after the usual 5 sec change
+    if (r < ROUNDS) steps.push(REST > 0 ? {kind:"rest", dur:REST, round:r, ex:0, e:exercises[0], label:"Rest"} : {kind:"trans", dur:TRANS, round:r + 1, ex:0, e:exercises[0], label:"Change"});
   }
   return steps;
 }
@@ -1336,7 +1339,7 @@ function next(){
     S.setsDone = (prev.round - 1) * exercises.length + prev.ex + 1;
     if (prev.ex === exercises.length - 1){
       S.roundsDone = prev.round;
-      if (prev.round < ROUNDS){ sfx.round(); toast(`Round ${prev.round} done`); burst(60); setTimeout(()=>say(`Round ${prev.round} complete! ${restWords(REST)} rest.`, ["round" + prev.round, "rest" + REST]), 900); }
+      if (prev.round < ROUNDS){ sfx.round(); toast(`Round ${prev.round} done`); burst(60); if (REST > 0){ const rk = COACH.clips?.["rest" + REST] ? ["rest" + REST] : ["n" + REST, "seconds"]; setTimeout(()=>say(`Round ${prev.round} complete! ${restWords(REST)} rest.`, ["round" + prev.round, ...rk]), 900); } else S.roundJustDone = prev.round; }
     }
   }
   S.i++;
@@ -1346,7 +1349,11 @@ function next(){
   $("session").dataset.phase = st.kind;
   if (st.kind === "work"){ sfx.go(); say(`Go! ${spokenName(e)}, ${spokenQty(e)}`, [nameKey("go", e), ...qtyClips(e)]); }
   else if (st.kind === "warm"){ sfx.go(); say(`Warm-up. ${spokenName(e)}, ${spokenQty(e)}`, [nameKey("warm", e), ...qtyClips(e)]); }
-  else if (st.kind === "trans" && S.i > 0) say(`Next up: ${spokenName(e)}`, [nameKey("next", e)]);
+  else if (st.kind === "trans" && S.i > 0){
+    const rd = S.roundJustDone; S.roundJustDone = 0;
+    if (rd) say(`Round ${rd} complete! Next up: ${spokenName(e)}`, ["round" + rd, nameKey("next", e)]);
+    else say(`Next up: ${spokenName(e)}`, [nameKey("next", e)]);
+  }
   render();
 }
 function render(){
