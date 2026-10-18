@@ -431,7 +431,7 @@ body[data-view="detail"] .rail{display:none}
           <div class="set"><label for="voiceSel">Voice</label>
             <div class="vrow"><select id="voiceSel" aria-label="Choose a voice"></select><button type="button" class="tcx" id="voiceTry">Preview</button></div></div>
           <label class="set">Sounds<span class="sw"><input type="checkbox" id="optSound" checked></span></label>
-          <p class="note">The coach speaks English: exercise, reps and kg, next up, a 3-2-1 countdown and ten seconds left in rest.</p>
+          <p class="note">The coach speaks English: exercise, reps and kg, next up, a 3-2-1 countdown and ten seconds left in rest. "Coach (recorded)" sounds the same on every device; the other voices come from this device.</p>
         </div>
       </div>
     </section>
@@ -1133,7 +1133,13 @@ $("gOut").onclick = async () => { try{ await FB.auth.signOut(); toast("Signed ou
 
 /* ---------- Audio: voice + synth sounds ---------- */
 let actx = null, audioOn = true;
-function ensureAudio(){ try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); }catch(e){} }
+function ensureAudio(){
+  try{
+    // iPhone: play through the silent switch, like a media app
+    if (navigator.audioSession) navigator.audioSession.type = "playback";
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume();
+  }catch(e){}
+}
 function tone(freq, t0, dur, type="triangle", vol=.25){
   if (!actx) return; const o = actx.createOscillator(), g = actx.createGain();
   o.type = type; o.frequency.value = freq; o.connect(g); g.connect(actx.destination);
@@ -1153,34 +1159,78 @@ const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jeste
 const voiceRank = v => (/premium|enhanced|siri|neural|natural|online/i.test(v.name) ? 0
   : /ava|zoe|samantha|allison|evan|nathan|daniel|serena|karen|moira|tom|susan|google|aria|jenny|guy/i.test(v.name) ? 1 : 2) * 2 + (/en[-_](us|gb)/i.test(v.lang) ? 0 : 1);
 const VOICE_KEY = "gd-voice-en2"; // new key: an older saved choice no longer overrides Samantha
+const REC = "__rec"; // the recorded coach (audio/coach.m4a), same voice on every device
 const isSamantha = v => /samantha/i.test(v.name) && /^en[-_]US/i.test(v.lang);
+const slugify = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/* recorded coach: one audio sprite with every phrase, played in slices with Web Audio (tools/make_voice.py makes it) */
+const COACH = {clips:null, raw:null, buf:null, nodes:[], loading:null};
+function loadCoach(){
+  return COACH.loading ||= (async () => {
+    try{
+      const [j, a] = await Promise.all([fetch("audio/coach.json").then(r => r.ok ? r.json() : null), fetch("audio/coach.m4a").then(r => r.ok ? r.arrayBuffer() : null)]);
+      if (j && a){ COACH.clips = j.clips; COACH.raw = a; pickVoice(); }
+    }catch(e){}
+  })();
+}
+async function coachReady(){
+  ensureAudio(); await loadCoach();
+  if (COACH.raw && !COACH.buf && actx){ try{ COACH.buf = await actx.decodeAudioData(COACH.raw.slice(0)); }catch(e){ COACH.raw = null; } }
+  return !!COACH.buf;
+}
+const recSelected = () => (store.get(VOICE_KEY, REC) || REC) === REC;
+function stopVoice(){ COACH.nodes.forEach(n => { try{ n.stop() }catch(e){} }); COACH.nodes = []; try{ speechSynthesis.cancel() }catch(e){} }
+function playClips(keys){
+  stopVoice(); let t = actx.currentTime + .03;
+  keys.forEach(k => { const [at, dur] = COACH.clips[k], n = actx.createBufferSource(); n.buffer = COACH.buf; n.connect(actx.destination); n.start(t, at, dur); COACH.nodes.push(n); t += dur + .06; });
+}
+// "12 reps per leg, 4 kilograms" as clip keys
+function qtyClips(e){
+  const k = ["n" + e.qty, e.type === "time" ? (e.side ? "seconds-per-side" : "seconds") : "reps" + (e.side ? "-" + slugify(e.side) : "")];
+  if (e.kg > 0){ const w = Math.floor(e.kg); if (w) k.push("n" + w); if (e.kg % 1) k.push("point-five"); k.push(e.kg === 1 ? "kilogram" : "kilograms"); }
+  return k;
+}
+const nameKey = (pre, e) => pre + "|" + slugify(spokenName(e));
+
 function pickVoice(){
   try{
     itVoices = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang) && !NOVELTY.test(v.name)).sort((a, b) => voiceRank(a) - voiceRank(b));
     const saved = store.get(VOICE_KEY, null);
-    // default: Samantha, US English (her Premium/Enhanced build first when installed)
+    // device voice fallback: Samantha, US English (her Premium/Enhanced build first when installed)
     const sam = itVoices.filter(isSamantha).sort((a, b) => voiceRank(a) - voiceRank(b));
     itVoice = itVoices.find(v => v.name === saved) || sam[0] || itVoices.find(v => /samantha/i.test(v.name)) || itVoices.find(v => /^en[-_]US/i.test(v.lang)) || itVoices[0] || null;
     const sel = $("voiceSel");
-    sel.innerHTML = itVoices.length ? itVoices.map(v => `<option value="${v.name.replace(/"/g, "&quot;")}">${v.name.replace(/\s*\(.*\)\s*$/, "")} (${v.lang.replace("_", "-")})</option>`).join("") : `<option>Loading voices…</option>`;
-    sel.disabled = !itVoices.length;
-    if (itVoice) sel.value = itVoice.name;
+    const rec = COACH.clips ? `<option value="${REC}">Coach (recorded)</option>` : "";
+    const dev = itVoices.map(v => `<option value="${v.name.replace(/"/g, "&quot;")}">${v.name.replace(/\s*\(.*\)\s*$/, "")} (${v.lang.replace("_", "-")})</option>`).join("");
+    sel.innerHTML = rec + dev || `<option>Loading voices…</option>`;
+    sel.disabled = !(rec || dev);
+    sel.value = COACH.clips && recSelected() ? REC : itVoice ? itVoice.name : sel.value;
   }catch(e){}
 }
 try{ pickVoice(); speechSynthesis.addEventListener?.("voiceschanged", pickVoice); speechSynthesis.onvoiceschanged = pickVoice }catch(e){}
-$("voiceSel").onchange = e => { itVoice = itVoices.find(v => v.name === e.target.value) || itVoice; store.set(VOICE_KEY, itVoice?.name); speakNow("Go! Goblet squat, twelve reps."); };
-$("voiceTry").onclick = () => speakNow("Go! Goblet squat, twelve reps. Three, two, one.");
-function say(text){
+loadCoach();
+const PREVIEW = ["Go! Goblet squat, 12 reps. 3, 2, 1.", ["go|goblet-squat", "n12", "reps", "n3", "n2", "n1"]];
+async function preview(){ if (recSelected() && await coachReady()) return playClips(PREVIEW[1]); speakNow(PREVIEW[0]); }
+$("voiceSel").onchange = e => {
+  if (e.target.value === REC) store.set(VOICE_KEY, REC);
+  else { itVoice = itVoices.find(v => v.name === e.target.value) || itVoice; store.set(VOICE_KEY, itVoice?.name); }
+  preview();
+};
+$("voiceTry").onclick = preview;
+// speaks with the recorded coach when every clip exists, otherwise with the device voice
+function say(text, keys){
   if (!audioOn || !$("optVoice").checked) return;
+  if (keys && recSelected() && COACH.buf && actx && keys.every(k => COACH.clips[k])) return playClips(keys);
   speakNow(text);
 }
 function speakNow(text){
   try{
+    stopVoice();
     // voices can arrive late (Safari): resolve again so the system language never takes over
     if (!itVoice || !speechSynthesis.getVoices().some(v => v.name === itVoice.name)) pickVoice();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "en-US"; if (itVoice){ u.voice = itVoice; u.lang = itVoice.lang.replace("_", "-"); }
-    u.rate = 1; speechSynthesis.cancel(); speechSynthesis.speak(u);
+    u.rate = 1; speechSynthesis.speak(u);
   }catch(e){}
 }
 const spokenName = e => e.name.replace("Dumbbell ", "").replace("Single-Arm", "single arm").replace(/, .*$/, "");
@@ -1210,7 +1260,8 @@ function buildSteps(){
   return steps;
 }
 function start(){
-  ensureAudio(); say(warmOn() ? "Here we go. Warm-up first." : "Here we go. Get ready.");
+  ensureAudio(); const w0 = warmOn();
+  coachReady().then(() => say(w0 ? "Here we go. Warm-up first." : "Here we go. Get ready.", [w0 ? "start-warm" : "start"]));
   S = {plan:PLAN, warm:warmOn(), steps:buildSteps(), i:-1, startWall:Date.now(), paused:false, pauseAt:0, pausedTotal:0, roundsDone:0, setsDone:0, spoken:-1, shownE:null};
   $("segs").innerHTML = Array.from({length:SETS}, (_, k) => `<i class="${k && k % exercises.length === 0 ? "gap" : ""}"></i>`).join("");
   $("sVideo").style.background = `var(${PLAN.grad})`;
@@ -1229,7 +1280,7 @@ function next(){
     S.setsDone = (prev.round - 1) * exercises.length + prev.ex + 1;
     if (prev.ex === exercises.length - 1){
       S.roundsDone = prev.round;
-      if (prev.round < ROUNDS){ sfx.round(); toast(`Round ${prev.round} done`); burst(60); setTimeout(()=>say(`Round ${prev.round} complete! ${restWords(REST)} rest.`), 900); }
+      if (prev.round < ROUNDS){ sfx.round(); toast(`Round ${prev.round} done`); burst(60); setTimeout(()=>say(`Round ${prev.round} complete! ${restWords(REST)} rest.`, ["round" + prev.round, "rest" + REST]), 900); }
     }
   }
   S.i++;
@@ -1237,9 +1288,9 @@ function next(){
   S.stepStart = now(); S.spoken = -1; S.switched = false;
   const st = S.steps[S.i], e = st.e;
   $("session").dataset.phase = st.kind;
-  if (st.kind === "work"){ sfx.go(); say(`Go! ${spokenName(e)}, ${spokenQty(e)}`); }
-  else if (st.kind === "warm"){ sfx.go(); say(`Warm-up. ${spokenName(e)}, ${spokenQty(e)}`); }
-  else if (st.kind === "trans" && S.i > 0) say(`Next up: ${spokenName(e)}`);
+  if (st.kind === "work"){ sfx.go(); say(`Go! ${spokenName(e)}, ${spokenQty(e)}`, [nameKey("go", e), ...qtyClips(e)]); }
+  else if (st.kind === "warm"){ sfx.go(); say(`Warm-up. ${spokenName(e)}, ${spokenQty(e)}`, [nameKey("warm", e), ...qtyClips(e)]); }
+  else if (st.kind === "trans" && S.i > 0) say(`Next up: ${spokenName(e)}`, [nameKey("next", e)]);
   render();
 }
 function render(){
@@ -1277,9 +1328,9 @@ function tick(){
     $("ringU").textContent = st.kind === "rest" ? "to next round" : isActive(st) ? "seconds left" : "seconds";
     frac = el / st.dur;
     if (!S.paused){
-      if (isActive(st) && e.side && !S.switched && el >= st.dur / 2){ S.switched = true; say("Switch sides"); sfx.beep(); }
-      if (st.kind === "rest" && sec === 10 && S.spoken !== 10){ S.spoken = 10; say("Ten seconds"); }
-      if (sec <= 3 && sec >= 1 && S.spoken !== sec){ S.spoken = sec; say(String(sec)); sfx.beep(); }
+      if (isActive(st) && e.side && !S.switched && el >= st.dur / 2){ S.switched = true; say("Switch sides", ["switch-sides"]); sfx.beep(); }
+      if (st.kind === "rest" && sec === 10 && S.spoken !== 10){ S.spoken = 10; say("Ten seconds", ["ten-seconds"]); }
+      if (sec <= 3 && sec >= 1 && S.spoken !== sec){ S.spoken = sec; say(String(sec), ["n" + sec]); sfx.beep(); }
       if (rem <= 0) next();
     }
   } else {
@@ -1299,8 +1350,8 @@ function tick(){
   $("rAll").textContent = `${Math.round(clamp(allFrac) * 100)}%`;
 }
 function togglePause(){
-  if (S.paused){ const d = now() - S.pauseAt; S.pausedTotal += d; S.stepStart += d; S.paused = false; $("pause").textContent = "Pause"; say("Let's go again"); }
-  else { S.paused = true; S.pauseAt = now(); $("pause").textContent = "Resume"; try{ speechSynthesis.cancel() }catch(e){} }
+  if (S.paused){ const d = now() - S.pauseAt; S.pausedTotal += d; S.stepStart += d; S.paused = false; $("pause").textContent = "Pause"; say("Let's go again", ["go-again"]); }
+  else { S.paused = true; S.pauseAt = now(); $("pause").textContent = "Resume"; stopVoice(); }
   tick();
 }
 async function finish(completed){
@@ -1315,7 +1366,7 @@ async function finish(completed){
     loads: exercises.map(e => ({id:e.id, qty:e.qty, kg:e.kg}))
   };
   if (duration > 20) await saveSession(rec);
-  if (completed){ sfx.finish(); burst(160); say("Workout complete! Great job."); }
+  if (completed){ sfx.finish(); burst(160); say("Workout complete! Great job.", ["finish"]); }
   showDone(rec, duration > 20);
 }
 function showDone(rec, saved){
@@ -1388,7 +1439,7 @@ function burst(n){
 $("startMob").onclick = start;
 $("mainBtn").onclick = () => { if (S && !S.over){ if (S.paused) togglePause(); next(); } };
 $("pause").onclick = () => S && !S.over && togglePause();
-$("mute").onclick = () => { audioOn = !audioOn; $("mute").setAttribute("aria-pressed", audioOn); if (!audioOn) try{ speechSynthesis.cancel() }catch(e){} };
+$("mute").onclick = () => { audioOn = !audioOn; $("mute").setAttribute("aria-pressed", audioOn); if (!audioOn) stopVoice(); };
 let quitArmed = false;
 $("quit").onclick = () => {
   if (!quitArmed){ quitArmed = true; $("quit").textContent = "Confirm"; $("quit").classList.add("armed"); setTimeout(() => { quitArmed = false; if ($("quit")){ $("quit").textContent = "Exit"; $("quit").classList.remove("armed"); } }, 2500); return; }
