@@ -268,9 +268,22 @@ body[data-view="detail"] .rail{display:none}
 .s-left{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}
 .s-name{font-size:clamp(28px,7.5vw,56px);margin:2px 0 0}
 .s-sub{color:var(--grey);font-size:14px;font-weight:500}
+.s-stage{position:relative;flex:1;display:flex;flex-direction:column;min-height:150px}
 .s-video{position:relative;flex:1;min-height:150px;background:var(--g-a);border-radius:24px;overflow:hidden;box-shadow:var(--shadow)}
 .s-video canvas,.s-video video,.s-video iframe{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border:0}
 .s-video .tag{position:absolute;left:12px;top:12px;background:rgba(255,255,255,.26);color:#fff;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font-weight:600;font-size:12px;padding:5px 12px;border-radius:var(--pill)}
+/* camera rep counter: mirrored preview with the skeleton, big count over the exercise video */
+.cam{position:absolute;right:10px;bottom:10px;z-index:2;width:clamp(120px,24%,240px);aspect-ratio:4/3;border-radius:16px;overflow:hidden;background:#111;box-shadow:var(--shadow)}
+.cam video,.cam canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.cam span{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.5);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:var(--pill)}
+.cam span:empty{display:none}
+.cam-count{position:absolute;right:12px;top:12px;z-index:2;min-width:96px;background:var(--card);border-radius:20px;padding:8px 16px 10px;text-align:center;box-shadow:var(--shadow)}
+.cam-count small{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)}
+.cam-count.rhythm small{color:#ec6f8a}
+.cam-count b{display:block;font-family:var(--display);font-weight:700;font-size:clamp(56px,9vw,96px);line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}
+.cam-count span{font-size:13px;color:var(--grey);font-weight:600}
+#camBtn[aria-pressed="false"]{text-decoration:none}
+#camBtn[aria-pressed="true"]{background:var(--accent);color:#fff}
 .s-reps{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .s-reps .big{font-family:var(--display);font-weight:700;font-size:clamp(40px,10vw,60px);line-height:1;color:var(--accent)}
 .s-reps .lbl{font-size:16px;color:var(--grey);font-weight:500}
@@ -442,6 +455,13 @@ body[data-view="detail"] .rail{display:none}
           <label class="set">Sounds<span class="sw"><input type="checkbox" id="optSound" checked></span></label>
           <p class="note">The coach speaks English: exercise, reps and kg, next up, a 3-2-1 countdown and ten seconds left in rest. "Coach (recorded)" sounds the same on every device; the other voices come from this device.</p>
         </div>
+        <div class="panel" id="camPanel" hidden>
+          <h2 class="ptitle">Rep counter</h2>
+          <label class="set">Count with camera<span class="sw"><input type="checkbox" id="optCam"></span></label>
+          <p class="note">The camera counts goblet and air squats, reverse lunges, shoulder presses and jumping jacks, and moves on at the last rep. Stand the iPad in landscape 2 to 3 metres away with your whole body in view. The video stays on the iPad: nothing is recorded or uploaded.</p>
+          <p class="note" style="margin-top:14px">When the camera loses you for 3 seconds, the coach keeps counting at this pace:</p>
+          <div id="paceList"></div>
+        </div>
       </div>
     </section>
   </main>
@@ -455,6 +475,7 @@ body[data-view="detail"] .rail{display:none}
     <div class="s-top">
       <button class="sbtn" id="quit">Exit</button>
       <button class="sbtn" id="mute" aria-pressed="true">Audio</button>
+      <button class="sbtn" id="camBtn" aria-pressed="false" hidden>Count with camera</button>
       <span class="clock num" id="tot" aria-label="Total time">00:00</span>
     </div>
     <div class="segs" id="segs" aria-label="Sets completed"></div>
@@ -464,7 +485,11 @@ body[data-view="detail"] .rail{display:none}
           <div class="s-sub num" id="where">Round 1 of 3, exercise 1 of 6</div>
           <h2 class="disp s-name" id="exName"></h2>
         </div>
-        <div class="s-video" id="sVideo"></div>
+        <div class="s-stage">
+          <div class="s-video" id="sVideo"></div>
+          <div class="cam-count" id="camCount" hidden aria-live="polite"><small id="camSrc">Camera</small><b class="num" id="camN">0</b><span id="camOf"></span></div>
+          <div class="cam" id="camBox" hidden><video id="camVid" playsinline muted autoplay></video><canvas id="camCv" aria-hidden="true"></canvas><span id="camTag"></span></div>
+        </div>
         <div class="s-reps" id="sReps">
           <span class="big num" id="repBig">12</span><span class="lbl" id="repLbl">reps</span>
           <span class="kg" id="kgPill" hidden><b id="kgVal"></b>kg</span>
@@ -954,7 +979,7 @@ function saveCfg(){
   store.set("gd-cfg", cfg); estimate();
   clearTimeout(cfgTimer);
   const vars = Object.fromEntries(["b","c","d"].map(b => [b, store.get("gd-var-" + b, b)]));
-  cfgTimer = setTimeout(() => { if (db && uid) histCol().doc("settings").set({cfg, videos, links, vars, warm:$("optWarm").checked, updated:new Date().toISOString()}).catch(() => {}) }, 700);
+  cfgTimer = setTimeout(() => { if (db && uid) histCol().doc("settings").set({cfg, videos, links, vars, warm:$("optWarm").checked, cam:$("optCam").checked, pace:store.get("gd-pace", {}), updated:new Date().toISOString()}).catch(() => {}) }, 700);
 }
 const range = (a, b, st) => { const o = []; for (let v = a; v <= b + 1e-9; v += st) o.push(Math.round(v * 10) / 10); return o; };
 // dropdowns for reps (or seconds) and kg per dumbbell; the current value is always one of the options
@@ -1133,6 +1158,8 @@ async function loadRemoteSettings(){
         if (data.vars) Object.entries(data.vars).forEach(([b, id]) => store.set("gd-var-" + b, id));
         if (data.links){ links = {...data.links}; store.set("gd-links", links); }
         if (typeof data.warm === "boolean"){ $("optWarm").checked = data.warm; store.set("gd-warm", data.warm); }
+        if (typeof data.cam === "boolean"){ $("optCam").checked = data.cam; store.set("gd-cam", data.cam); }
+        if (data.pace){ store.set("gd-pace", data.pace); if (CAM_OK) renderPaces(); }
       }
     } else saveCfg();
   }catch(e){}
@@ -1346,6 +1373,7 @@ function start(){
   $("segs").innerHTML = Array.from({length:SETS}, (_, k) => `<i class="${k && k % exercises.length === 0 ? "gap" : ""}"></i>`).join("");
   $("sVideo").style.background = `var(${PLAN.grad})`;
   $("app").hidden = true; $("startbar").hidden = true; $("session").hidden = false;
+  if (CAM_OK && $("optCam").checked) camOn();
   requestWake(); next(); timer = setInterval(tick, 100);
 }
 function requestWake(){ try{ navigator.wakeLock?.request("screen").then(l => wakeLock = l).catch(()=>{}) }catch(e){} }
@@ -1375,6 +1403,7 @@ function next(){
     if (rd) say(`Round ${rd} complete! Next up: ${spokenName(e)}`, ["round" + rd, nameKey("next", e)]);
     else say(`Next up: ${spokenName(e)}`, [nameKey("next", e)]);
   }
+  camStep();
   render();
 }
 function render(){
@@ -1432,6 +1461,7 @@ function tick(){
   [["barStep", 333, frac], ["barRound", 248.2, roundFrac], ["barAll", 163.4, allFrac]].forEach(([id, C, f]) => $(id).style.strokeDashoffset = C * (1 - clamp(f)));
   $("rRound").textContent = st.warm ? "—" : `${st.round}/${ROUNDS}`;
   $("rAll").textContent = `${Math.round(clamp(allFrac) * 100)}%`;
+  camTick();
 }
 function togglePause(){
   if (S.paused){ const d = now() - S.pauseAt; S.pausedTotal += d; S.stepStart += d; S.paused = false; $("pause").textContent = "Pause"; say("Let's go again", ["go-again"]); }
@@ -1441,6 +1471,7 @@ function togglePause(){
 async function finish(completed){
   if (!S || S.over) return;
   S.over = true; clearInterval(timer); try{ wakeLock?.release() }catch(e){}
+  camOff();
   const duration = elapsedTotal();
   const rec = {
     id: "s" + S.startWall, workout: PLAN.id, title: `${PLAN.name}${PLAN.base ? " (band + step)" : ""}, ${PLAN.day}`, start: new Date(S.startWall).toISOString(),
@@ -1472,6 +1503,196 @@ function showDone(rec, saved){
   if (saved) $("dTcx").onclick = () => exportTcx(rec);
   $("dHome").onclick = () => location.reload();
 }
+
+/* ---------- Camera rep counter (GitHub Pages pilot): pose found on the device, video never leaves it ---------- */
+// REPCOUNT:start (pure logic, also run by tools/test_repcount.mjs on recorded landmark sequences)
+const REPCOUNT = (() => {
+  const J = {nose:0, ls:11, rs:12, le:13, re:14, lw:15, rw:16, lh:23, rh:24, lk:25, rk:26, la:27, ra:28};
+  const seen = (lm, ids) => ids.every(i => lm[i] && (lm[i].visibility ?? 1) > .5);
+  // angle at b in degrees; world landmarks are 3D metres, so a knee bent toward the camera still reads right
+  const ang = (a, b, c) => {
+    const u = [a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0)], v = [c.x - b.x, c.y - b.y, (c.z || 0) - (b.z || 0)];
+    const d = Math.hypot(...u) * Math.hypot(...v);
+    return d ? Math.acos(Math.max(-1, Math.min(1, (u[0]*v[0] + u[1]*v[1] + u[2]*v[2]) / d))) * 180 / Math.PI : 180;
+  };
+  const knees = w => [ang(w[J.lh], w[J.lk], w[J.la]), ang(w[J.rh], w[J.rk], w[J.ra])];
+  const elbows = w => [ang(w[J.ls], w[J.le], w[J.lw]), ang(w[J.rs], w[J.re], w[J.rw])];
+  const LEGS = [J.lh, J.rh, J.lk, J.rk, J.la, J.ra];
+  // zone "a" is the rest position, "b" the far end; a rep counts on reaching `at`, with hysteresis between the two zones
+  // and at least `gap` seconds between reps
+  const RULES = {
+    squat:{need:LEGS, gap:.9, at:"a", val:(lm, w) => (knees(w)[0] + knees(w)[1]) / 2,
+      zone:v => v > 155 ? "a" : v < 105 ? "b" : null, show:v => `Knee ${Math.round(v)}°`},
+    lunge:{need:LEGS, gap:.9, at:"a", val:(lm, w) => Math.min(...knees(w)), // the front knee bends most
+      zone:v => v > 155 ? "a" : v < 110 ? "b" : null, show:v => `Knee ${Math.round(v)}°`},
+    press:{need:[J.nose, J.ls, J.rs, J.le, J.re, J.lw, J.rw], gap:.7, at:"b", val:(lm, w) => (elbows(w)[0] + elbows(w)[1]) / 2,
+      zone:(v, lm) => v > 150 && lm[J.lw].y < lm[J.nose].y && lm[J.rw].y < lm[J.nose].y ? "b" : v < 100 ? "a" : null, show:v => `Elbow ${Math.round(v)}°`},
+    jacks:{need:[J.ls, J.rs, J.lw, J.rw, ...LEGS], gap:.4, at:"a", ease:.75, // ankle spread in hip widths, image coordinates
+      val:lm => Math.abs(lm[J.la].x - lm[J.ra].x) / Math.max(.01, Math.abs(lm[J.lh].x - lm[J.rh].x)),
+      zone:(v, lm) => {
+        const sh = Math.min(lm[J.ls].y, lm[J.rs].y), up = lm[J.lw].y < sh && lm[J.rw].y < sh, down = lm[J.lw].y > sh && lm[J.rw].y > sh;
+        return up && v > 2 ? "b" : down && v < 1.5 ? "a" : null;
+      }, show:v => `Feet ${v.toFixed(1)}×`},
+  };
+  const BY_MOTION = {goblet:"squat", lunge:"lunge", press:"press", jacks:"jacks"};
+  return {
+    kindOf: e => e.type === "reps" && BY_MOTION[e.motion || e.id] || null,
+    create(kind){
+      const r = RULES[kind]; let state = null, sm = null, last = -Infinity, seenT = -Infinity;
+      return {
+        kind, count:0, value:null,
+        visible: lm => !!lm && seen(lm, r.need),
+        label(){ return this.value === null ? "" : r.show(this.value) },
+        // after a switch of sides or lost tracking: wait for the rest position again before counting
+        reset(){ state = null; sm = null; this.value = null; },
+        // t in seconds; true when this frame completes a rep
+        feed(t, lm, world){
+          if (!this.visible(lm)) return false;
+          if (t - seenT > .5) sm = null; // smoothing starts over after a gap in tracking
+          seenT = t;
+          const v = r.val(lm, world || lm); sm = sm === null ? v : sm + (v - sm) * (r.ease || .5); this.value = sm;
+          const z = r.zone(sm, lm);
+          if (!z || z === state || (state === null && z !== "a")) return false;
+          const was = state; state = z;
+          if (was === null || z !== r.at || t - last < r.gap) return false;
+          last = t; this.count++; return true;
+        },
+      };
+    },
+  };
+})();
+// REPCOUNT:end
+const PACE = {squat:3, lunge:3, press:2.5, jacks:1}; // seconds per rep when counting by rhythm
+const CAM_OK = LINKS_ON && !!navigator.mediaDevices?.getUserMedia;
+const POSE_LIB = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const POSE_MODEL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+const CAM = {on:false, stream:null, pose:null, loading:null, raf:0, lastT:-1, c:null, e:null, n:0, side:1, seen:0, beat:0, mode:"camera", done:false};
+const camPace = e => +store.get("gd-pace", {})[spokenName(e)] || PACE[REPCOUNT.kindOf(e)] || 3;
+function loadPose(){
+  return CAM.loading ||= (async () => {
+    const {FilesetResolver, PoseLandmarker} = await import(POSE_LIB + "/vision_bundle.mjs");
+    const files = await FilesetResolver.forVisionTasks(POSE_LIB + "/wasm");
+    const opts = delegate => ({baseOptions:{modelAssetPath:POSE_MODEL, delegate}, runningMode:"VIDEO", numPoses:1});
+    try{ return await PoseLandmarker.createFromOptions(files, opts("GPU")); }
+    catch(e){ return await PoseLandmarker.createFromOptions(files, opts("CPU")); }
+  })().catch(err => { CAM.loading = null; throw err; });
+}
+function camUi(msg){
+  $("camBtn").setAttribute("aria-pressed", CAM.on);
+  $("camBox").hidden = !CAM.on;
+  if (msg != null) $("camTag").textContent = msg;
+}
+async function camOn(){
+  if (CAM.on || !CAM_OK) return;
+  CAM.on = true; camUi("Starting camera…");
+  try{ CAM.stream = await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:"user", width:{ideal:640}, height:{ideal:480}}}); }
+  catch(err){ camOff(); toast(err?.name === "NotAllowedError" ? "Camera blocked: allow it for this site" : "No camera available"); return; }
+  if (!CAM.on){ CAM.stream.getTracks().forEach(t => t.stop()); CAM.stream = null; return; }
+  const v = $("camVid"); v.srcObject = CAM.stream; v.play().catch(() => {});
+  camUi("Loading pose model…");
+  try{ CAM.pose = await loadPose(); }
+  catch(e){ camOff(); toast("Rep counter needs a connection"); return; }
+  if (!CAM.on) return;
+  camUi(""); cancelAnimationFrame(CAM.raf); camLoop();
+  if (S && !S.over) camStep();
+}
+function camOff(){
+  CAM.on = false; cancelAnimationFrame(CAM.raf);
+  CAM.stream?.getTracks().forEach(t => t.stop()); CAM.stream = null;
+  if ($("camVid")) $("camVid").srcObject = null;
+  CAM.c = null;
+  if ($("camBox")){ camUi(""); camPaint(); }
+}
+function camLoop(){
+  CAM.raf = requestAnimationFrame(camLoop);
+  const v = $("camVid");
+  if (!CAM.pose || !v || v.readyState < 2 || v.currentTime === CAM.lastT) return;
+  CAM.lastT = v.currentTime;
+  let r; try{ r = CAM.pose.detectForVideo(v, performance.now()); }catch(e){ return; }
+  camFrame(r.landmarks?.[0] || null, r.worldLandmarks?.[0] || null);
+}
+// one pose (or none) from the camera: draw it and, during a counted set, feed the counter
+function camFrame(lm, world){
+  camDraw(lm);
+  const c = CAM.c;
+  if (!c || CAM.done || !S || S.over || S.paused) return;
+  if (!c.visible(lm)){ $("camTag").textContent = "Step into view"; return; }
+  CAM.seen = now();
+  if (CAM.mode === "rhythm"){ CAM.mode = "camera"; c.reset(); camPaint(); }
+  if (c.feed(now() / 1000, lm, world)) camRep();
+  $("camTag").textContent = c.label();
+}
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+function camDraw(lm){
+  const cv = $("camCv"), v = $("camVid"); if (!cv) return;
+  if (v.videoWidth && cv.width !== v.videoWidth){ cv.width = v.videoWidth; cv.height = v.videoHeight; }
+  const x = cv.getContext("2d"), W = cv.width, H = cv.height;
+  x.clearRect(0, 0, W, H);
+  if (!lm) return;
+  const ok = i => lm[i] && (lm[i].visibility ?? 1) > .5;
+  x.lineWidth = Math.max(3, W / 120); x.lineCap = "round"; x.strokeStyle = CAM.mode === "rhythm" ? "#ec6f8a" : "#a48bff"; x.fillStyle = "#fff";
+  BONES.forEach(([a, b]) => { if (!ok(a) || !ok(b)) return; x.beginPath(); x.moveTo(lm[a].x * W, lm[a].y * H); x.lineTo(lm[b].x * W, lm[b].y * H); x.stroke(); });
+  [...new Set(BONES.flat())].forEach(i => { if (ok(i)){ x.beginPath(); x.arc(lm[i].x * W, lm[i].y * H, x.lineWidth, 0, 7); x.fill(); } });
+}
+// a new step: count it when the camera is on and the move is one the counter knows
+function camStep(){
+  const st = S.steps[S.i], kind = CAM.on && isActive(st) ? REPCOUNT.kindOf(st.e) : null;
+  Object.assign(CAM, {c: kind ? REPCOUNT.create(kind) : null, e:st.e, n:0, side:1, seen:now(), beat:now(), mode:"camera", done:false});
+  if (CAM.on) $("camTag").textContent = kind ? "" : isActive(st) ? "Not counted" : "";
+  camPaint();
+}
+function camPaint(){
+  const c = CAM.c, box = $("camCount"); if (!box) return;
+  box.hidden = !c;
+  if (!c) return;
+  const e = CAM.e;
+  box.classList.toggle("rhythm", CAM.mode === "rhythm");
+  $("camSrc").textContent = CAM.mode === "rhythm" ? "Rhythm" : "Camera";
+  $("camN").textContent = CAM.n;
+  $("camOf").textContent = `of ${e.qty}` + (e.side ? `, ${e.side.replace("per ", "")} ${CAM.side}` : "");
+}
+function camRep(){
+  const e = CAM.e, n = ++CAM.n, lastSide = CAM.side === sides(e);
+  CAM.beat = now();
+  if (n >= e.qty){
+    if (!lastSide){ CAM.side++; CAM.n = 0; CAM.c.reset(); CAM.beat += 2000; say(`${n}. Switch sides`, ["n" + n, "switch-sides"]); sfx.beep(); }
+    else {
+      CAM.done = true; say(String(n), ["n" + n]);
+      const i = S.i; setTimeout(() => { if (S && !S.over && S.i === i) next(); }, 1000);
+    }
+  } else if (n === e.qty - 1 && lastSide) say(`${n}, last one!`, ["n" + n, "last-one"]);
+  else say(String(n), ["n" + n]);
+  camPaint();
+}
+// from tick(): after 3 s without a pose the coach keeps counting at the exercise's pace
+function camTick(){
+  if (!CAM.c || CAM.done) return;
+  const t = now();
+  if (S.paused){ CAM.seen = CAM.beat = t; return; }
+  if (CAM.mode === "camera" && t - CAM.seen > 3000){ CAM.mode = "rhythm"; CAM.beat = t; $("camTag").textContent = "Lost you: counting by rhythm"; camPaint(); }
+  if (CAM.mode === "rhythm" && t - CAM.beat >= camPace(CAM.e) * 1000) camRep();
+}
+// iPad: the camera stops in the background; start it again on return
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && CAM.on && CAM.stream?.getVideoTracks().every(t => t.readyState === "ended")){ camOff(); camOn(); }
+});
+$("camBtn").hidden = !CAM_OK;
+$("camBtn").onclick = () => { if (!S || S.over) return; if (CAM.on) camOff(); else camOn(); };
+$("camPanel").hidden = !CAM_OK;
+$("optCam").checked = store.get("gd-cam", false);
+$("optCam").onchange = e => { store.set("gd-cam", e.target.checked); saveCfg(); };
+function renderPaces(){
+  const seenNames = new Set(), rows = WORKOUTS.flatMap(w => [...w.warmup, ...w.exercises]).filter(e => {
+    const k = REPCOUNT.kindOf(e) && spokenName(e); if (!k || seenNames.has(k)) return false; seenNames.add(k); return true;
+  });
+  $("paceList").innerHTML = rows.map((e, i) => `<div class="set"><label for="pace${i}">${spokenName(e)}</label>
+    <div class="vrow"><select id="pace${i}" data-k="${spokenName(e)}">${range(1, 6, .5).map(s => `<option value="${s}">${s} sec per rep</option>`).join("")}</select></div></div>`).join("");
+  $("paceList").querySelectorAll("select").forEach((sel, i) => {
+    sel.value = String(camPace(rows[i]));
+    sel.onchange = () => { const p = store.get("gd-pace", {}); p[sel.dataset.k] = +sel.value; store.set("gd-pace", p); saveCfg(); };
+  });
+}
+if (CAM_OK) renderPaces();
 
 /* ---------- TCX export ---------- */
 function buildTcx(r){
