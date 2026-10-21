@@ -155,6 +155,8 @@ body[data-view="detail"] .rail{display:none}
 .wrow{display:grid;grid-template-columns:58px minmax(0,1fr);gap:14px;align-items:center;padding:10px 0}
 .wrow b{display:block;font-weight:600;font-size:15px;line-height:1.3}
 .wrow span{color:var(--grey);font-size:13px}
+.wrow .vid{display:block;margin-top:3px;font-size:13px;font-weight:600;color:var(--link);padding:2px 0;text-align:left}
+#warmList .vlink{margin-bottom:12px}
 .thumb{position:relative;aspect-ratio:1;max-width:100%;background:var(--ctl);border-radius:14px;overflow:hidden}
 .thumb canvas,.thumb video,.thumb img.vthumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .thumb .play{position:absolute;right:5px;bottom:5px;width:22px;height:22px;border-radius:50%;background:rgba(28,26,53,.6);color:#fff;font-size:9px;display:grid;place-items:center;z-index:1;padding-left:2px}
@@ -378,7 +380,7 @@ body[data-view="detail"] .rail{display:none}
         </div>
         <div class="d-right wrap">
           <div class="block" id="warmCard" hidden>
-            <div class="block-h"><h3>Warm-Up</h3><span>about 5 min</span><label class="sw"><input type="checkbox" id="optWarm" checked aria-label="Include the warm-up"></label></div>
+            <div class="block-h"><h3>Warm-Up</h3><span id="warmMin">about 5 min</span><label class="sw"><input type="checkbox" id="optWarm" checked aria-label="Include the warm-up"></label></div>
             <p class="offnote" id="warmOff" hidden>Skipped: switch it on to include it.</p>
             <ul class="list" id="warmList"></ul>
           </div>
@@ -512,7 +514,11 @@ const TRANS = 5, KG_STEP = 1;
 const WORKOUTS = [
   {id:"a", day:"Monday", short:"Mon", letter:"A", name:"Glycogen Depletion", focus:"Full body", level:"Hard", grad:"--g-a",
    blurb:"Six exercises back to back, no rest.", plan:"3 rounds, 2 min rest", rounds:3, rest:120, done:"Tank empty.",
-   warmup:[],
+   warmup:[
+    {id:"w-jacks45", name:"Jumping Jacks", type:"time", qty:45, kg:null, motion:"jacks"},
+    {id:"w-wgs", name:"World's Greatest Stretch", type:"time", qty:45, kg:null, motion:"wgs"},
+    {id:"w-squathold", name:"Bodyweight Squat Hold, pause at the bottom", type:"time", qty:45, kg:null, motion:"squathold"},
+   ],
    exercises:[
     {id:"goblet", name:"Dumbbell Goblet Squat", muscle:"Quads and glutes", type:"reps", qty:12, step:1, kg:12},
     {id:"floor", name:"Dumbbell Floor Press", muscle:"Chest and triceps", type:"reps", qty:12, step:1, kg:8},
@@ -754,6 +760,14 @@ const MOTION = {
   bandrow:{period:2.4, bells:null,
     a:P([47,62],[50,86],[58,70],[68,74],[66,84],[82,88]),
     b:P([45,62],[50,86],[38,72],[50,72],[66,84],[82,88])},
+  // deep lunge, hands down, then the inside arm rotates up to the ceiling
+  wgs:{period:3.4, bells:null,
+    a:P([42,60],[50,72],[50,74],[54,90],[62,72],[64,92],[36,86],[22,90],[44,74],[46,90]),
+    b:P([45,54],[50,72],[47,40],[49,26],[62,72],[64,92],[36,86],[22,90],[44,72],[46,90])},
+  // bottom of a squat, arms forward, small breathing pulse
+  squathold:{period:3, bells:null,
+    a:P([47,46],[40,69],[56,52],[66,50],[58,74],[52,92]),
+    b:P([47,44],[40,67],[56,50],[66,48],[58,73],[52,92])},
   deadbug:{period:2.4, bells:null,
     a:P([30,86],[56,86],[30,74],[30,62],[56,70],[68,70],[70,82],[84,86],[22,84],[14,86]),
     b:P([30,86],[56,86],[22,84],[14,86],[70,82],[84,86],[56,70],[68,70],[30,74],[30,62])},
@@ -1003,8 +1017,13 @@ function renderList(){
   PLAN.warmup.forEach(w => {
     const li = document.createElement("li");
     const q = w.type === "time" ? (w.qty % 60 === 0 ? w.qty / 60 + " min" : w.qty + " sec") : w.qty + " reps";
-    li.innerHTML = `<div class="wrow"><div class="thumb"></div><div><b>${w.name}</b><span>${q}${w.side ? " " + w.side : ""}</span></div></div>`;
+    li.innerHTML = `<div class="wrow"><div class="thumb"></div><div><b>${w.name}</b><span>${q}${w.side ? " " + w.side : ""}</span>
+      ${assets ? `<button class="vid" type="button">${videos[w.id] ? "Change video" : "Upload your video"}</button>`
+        : LINKS_ON ? `<button class="vid" type="button" aria-expanded="false">${links[w.id] ? "Change video link" : "Add video link"}</button>` : ""}</div></div>`;
     mountMotion(li.querySelector(".thumb"), w, {zoom:1, shift:-2});
+    const vb = li.querySelector(".vid");
+    if (vb && assets) vb.onclick = () => { pickFor = w.id; $("vidPick").value = ""; $("vidPick").click(); };
+    else if (vb) vb.onclick = () => openLinkEditor(li, w, vb);
     $("warmList").appendChild(li);
   });
   const hero = $("heroMedia"); hero.style.background = `var(${PLAN.grad})`;
@@ -1032,6 +1051,7 @@ function renderPlan(){
   $("roundChips").querySelectorAll("button").forEach(b => b.onclick = () => setPlanNum("rounds", +b.dataset.v));
   $("restChips").querySelectorAll("button").forEach(b => b.onclick = () => setPlanNum("rest", +b.dataset.v));
   $("warmCard").hidden = !PLAN.warmup.length;
+  $("warmMin").textContent = `about ${Math.max(1, Math.round(PLAN.warmup.reduce((t, w) => t + repSeconds(w) + TRANS, 0) / 60))} min`;
   $("warmOff").hidden = $("optWarm").checked;
   renderList(); estimate();
 }
@@ -1217,7 +1237,7 @@ const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jeste
 const voiceRank = v => (/premium|enhanced|siri|neural|natural|online/i.test(v.name) ? 0
   : /ava|zoe|samantha|allison|evan|nathan|daniel|serena|karen|moira|tom|susan|google|aria|jenny|guy/i.test(v.name) ? 1 : 2) * 2 + (/en[-_](us|gb)/i.test(v.lang) ? 0 : 1);
 const VOICE_KEY = "gd-voice-en2"; // new key: an older saved choice no longer overrides Samantha
-const REC = "__rec"; // the recorded coach (coach.m4a), same voice on every device
+const REC = "__rec"; // the recorded coach (coach.mp4), same voice on every device
 const isSamantha = v => /samantha/i.test(v.name) && /^en[-_]US/i.test(v.lang);
 const slugify = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -1226,7 +1246,7 @@ const COACH = {clips:null, raw:null, buf:null, nodes:[], loading:null};
 function loadCoach(){
   return COACH.loading ||= (async () => {
     try{
-      const [j, a] = await Promise.all([fetch("coach.json").then(r => r.ok ? r.json() : null), fetch("coach.m4a").then(r => r.ok ? r.arrayBuffer() : null)]);
+      const [j, a] = await Promise.all([fetch("coach.json").then(r => r.ok ? r.json() : null), fetch("coach.mp4").then(r => r.ok ? r.arrayBuffer() : null)]);
       if (j && a){ COACH.clips = j.clips; COACH.raw = a; pickVoice(); }
     }catch(e){}
   })();
