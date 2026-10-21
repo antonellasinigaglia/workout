@@ -273,6 +273,7 @@ body[data-view="detail"] .rail{display:none}
 .s-stage{position:relative;flex:1;display:flex;flex-direction:column;min-height:150px}
 .s-video{position:relative;flex:1;min-height:150px;background:var(--g-a);border-radius:24px;overflow:hidden;box-shadow:var(--shadow)}
 .s-video canvas,.s-video video,.s-video iframe{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border:0}
+.s-video video.vbg{object-fit:cover;filter:blur(24px) saturate(1.15) brightness(.9);transform:scale(1.15)}
 .s-video .tag{position:absolute;left:12px;top:12px;background:rgba(255,255,255,.26);color:#fff;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font-weight:600;font-size:12px;padding:5px 12px;border-radius:var(--pill)}
 /* camera rep counter: mirrored preview with the skeleton, big count over the exercise video */
 .cam{position:absolute;right:10px;bottom:10px;z-index:2;width:clamp(120px,24%,240px);aspect-ratio:4/3;border-radius:16px;overflow:hidden;background:#111;box-shadow:var(--shadow)}
@@ -872,8 +873,14 @@ function mountMotion(el, e, opts = {}){
   const v = document.createElement("video");
   Object.assign(v, {src:url, muted:true, loop:true, playsInline:true, autoplay:!reduceMotion, preload:"metadata"});
   v.setAttribute("aria-label", "Exercise video");
-  v.onerror = () => { if (!v.isConnected) return; v.remove(); fallback(); };
   el.prepend(v);
+  // session: the whole clip stays in view, over a blurred copy of itself that fills the card
+  const bg = opts.live && document.createElement("video");
+  if (bg){
+    Object.assign(bg, {src:url, muted:true, loop:true, playsInline:true, autoplay:!reduceMotion, preload:"metadata", className:"vbg"});
+    bg.setAttribute("aria-hidden", "true"); el.prepend(bg);
+  }
+  v.onerror = () => { if (!v.isConnected) return; v.remove(); bg?.remove(); fallback(); };
 }
 const getVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 // white figure on the gradient cards and heroes
