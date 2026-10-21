@@ -823,7 +823,8 @@ function videoEmbed(url){
 function mountMotion(el, e, opts = {}){
   el.querySelectorAll("canvas,video,iframe,img.vthumb,.play").forEach(n => n.remove());
   const link = LINKS_ON && !opts.figure && videoEmbed(links[e.id]);
-  if (link && link.kind !== "file"){
+  // lists show a thumbnail (or the figure) with a play badge; only the session plays the video itself
+  if (link && (link.kind !== "file" || !opts.live)){
     if (opts.live){ // the session plays the linked video
       const f = document.createElement("iframe");
       Object.assign(f, {src:link.src, title:`${e.name} video`, allow:"autoplay; encrypted-media; picture-in-picture; fullscreen", referrerPolicy:"strict-origin-when-cross-origin"});
@@ -838,7 +839,7 @@ function mountMotion(el, e, opts = {}){
     el.prepend(c);
     views.add({canvas:c, motion:e.motion || e.id, bells:e.kg > 0, still:reduceMotion, fg:opts.fg || getVar("--ink"), far:opts.far || getVar("--grey"), floor:opts.floor || getVar("--line"), zoom:opts.zoom, shift:opts.shift});
   };
-  if (link && link.kind !== "file") return fallback();
+  if (link && (link.kind !== "file" || !opts.live)) return fallback();
   const url = link ? link.src : opts.figure ? null : videoUrl(e.id);
   if (!url) return fallback();
   const v = document.createElement("video");
@@ -1520,7 +1521,8 @@ function burst(n){
 
 /* ---------- Wiring ---------- */
 $("startMob").onclick = start;
-$("mainBtn").onclick = () => { if (S && !S.over){ if (S.paused) togglePause(); next(); } };
+// a quick second tap on Done would land on Skip and throw away the rest: ignore taps in the first 1.5 s of a step
+$("mainBtn").onclick = () => { if (S && !S.over){ if (!S.paused && now() - S.stepStart < 1500) return; if (S.paused) togglePause(); next(); } };
 $("pause").onclick = () => S && !S.over && togglePause();
 $("mute").onclick = () => { audioOn = !audioOn; $("mute").setAttribute("aria-pressed", audioOn); if (!audioOn) stopVoice(); };
 let quitArmed = false;
