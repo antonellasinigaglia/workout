@@ -1158,10 +1158,13 @@ async function loadRemoteSettings(){
       if (!S){
         applyCfg(data.cfg); if (data.cfg) store.set("gd-cfg", data.cfg);
         if (data.vars) Object.entries(data.vars).forEach(([b, id]) => store.set("gd-var-" + b, id));
-        if (data.links){ links = {...data.links}; store.set("gd-links", links); }
+        // video links are merged: one added on this device before signing in is kept and sent to the account
+        const mine = store.get("gd-links", {}), only = Object.keys(mine).some(k => mine[k] && !(data.links || {})[k]);
+        links = {...mine, ...(data.links || {})}; store.set("gd-links", links);
         if (typeof data.warm === "boolean"){ $("optWarm").checked = data.warm; store.set("gd-warm", data.warm); }
         if (typeof data.cam === "boolean"){ $("optCam").checked = data.cam; store.set("gd-cam", data.cam); }
         if (data.pace){ store.set("gd-pace", data.pace); if (CAM_OK) renderPaces(); }
+        if (only) saveCfg();
       }
     } else saveCfg();
   }catch(e){}
